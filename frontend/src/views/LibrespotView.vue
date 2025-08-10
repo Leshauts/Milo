@@ -1,8 +1,8 @@
-<!-- LibrespotView.vue - Version animation unique avec preload -->
+<!-- LibrespotView.vue - Version PASSIVE sans animations internes -->
 <template>
-  <div v-if="isReadyToShow" class="librespot-player" :class="{ 'animate-stagger': shouldAnimate }">
+  <div class="librespot-player">
     <div class="now-playing">
-      <!-- Partie gauche : Image de couverture avec staggering CSS -->
+      <!-- Partie gauche : Image de couverture -->
       <div class="album-art-section stagger-1">
         <div class="album-art-container">
           <!-- Blur en arrière-plan -->
@@ -18,7 +18,7 @@
         </div>
       </div>
 
-      <!-- Partie droite : Informations et contrôles avec staggering CSS -->
+      <!-- Partie droite : Informations et contrôles -->
       <div class="content-section stagger-2">
         <!-- Bloc 1 : Informations (prend l'espace restant) -->
         <div class="track-info stagger-3">
@@ -29,8 +29,8 @@
         <!-- Bloc 2 : Contrôles (aligné en bas) -->
         <div class="controls-section">
           <div class="progress-wrapper stagger-4">
-          <ProgressBar :currentPosition="currentPosition" :duration="duration"
-            :progressPercentage="progressPercentage" @seek="seekTo" />
+            <ProgressBar :currentPosition="currentPosition" :duration="duration"
+              :progressPercentage="progressPercentage" @seek="seekTo" />
           </div>
           <div class="controls-wrapper stagger-5">
             <PlaybackControls :isPlaying="persistentMetadata.is_playing" @play-pause="togglePlayPause"
@@ -60,11 +60,6 @@ const unifiedStore = useUnifiedAudioStore();
 const { togglePlayPause, previousTrack, nextTrack } = useLibrespotControl();
 const { currentPosition, duration, progressPercentage, seekTo } = usePlaybackProgress();
 
-// === LOGIQUE SIMPLE D'ANIMATION UNIQUE ===
-const hasAnimated = ref(false);
-const imageLoaded = ref(false);
-const imageError = ref(false);
-
 // === PERSISTANCE DES MÉTADONNÉES ===
 const lastValidMetadata = ref({
   title: '',
@@ -91,64 +86,6 @@ const persistentMetadata = computed(() => {
   return lastValidMetadata.value;
 });
 
-// === LOGIQUE D'AFFICHAGE SIMPLE ===
-const isReadyToShow = computed(() => {
-  // Si on a déjà animé, toujours afficher
-  if (hasAnimated.value) return true;
-  
-  // Première fois : attendre le preload de l'image si elle existe
-  if (persistentMetadata.value.album_art_url) {
-    return imageLoaded.value || imageError.value;
-  }
-  
-  // Pas d'image : afficher directement
-  return true;
-});
-
-const shouldAnimate = computed(() => {
-  // Animer seulement si on n'a pas encore animé ET qu'on est prêt à afficher
-  return !hasAnimated.value && isReadyToShow.value;
-});
-
-// === PRELOAD DE L'IMAGE (seulement si pas encore animé) ===
-watch(() => persistentMetadata.value.album_art_url, (newUrl) => {
-  // Si on a déjà animé, pas de preload nécessaire
-  if (hasAnimated.value) return;
-  
-  if (!newUrl) {
-    imageLoaded.value = true;
-    imageError.value = false;
-    return;
-  }
-  
-  // Reset des états
-  imageLoaded.value = false;
-  imageError.value = false;
-  
-  // Preload de l'image
-  const img = new Image();
-  img.onload = () => {
-    imageLoaded.value = true;
-    console.log('🖼️ Image preloaded:', newUrl);
-  };
-  img.onerror = () => {
-    imageError.value = true;
-    console.warn('🖼️ Image preload failed:', newUrl);
-  };
-  img.src = newUrl;
-}, { immediate: true });
-
-// === MARQUER COMME ANIMÉ APRÈS LA PREMIÈRE ANIMATION ===
-watch(shouldAnimate, (newValue) => {
-  if (newValue) {
-    // Une fois qu'on commence à animer, marquer comme animé après un délai
-    setTimeout(() => {
-      hasAnimated.value = true;
-      console.log('🎬 LibrespotView animation completed');
-    }, 600); // Durée de l'animation stagger la plus longue
-  }
-});
-
 // === WATCHERS ===
 watch(() => unifiedStore.metadata, (newMetadata) => {
   if (newMetadata?.position !== undefined) {
@@ -158,6 +95,8 @@ watch(() => unifiedStore.metadata, (newMetadata) => {
 
 // === LIFECYCLE ===
 onMounted(async () => {
+  console.log('🎬 LibrespotView mounted - PASSIVE (no internal animations)');
+  
   try {
     const response = await axios.get('/librespot/status');
     if (response.data.status === 'ok') {
@@ -184,57 +123,14 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* === STAGGERING CSS CONDITIONNEL === */
+/* === PLUS D'ANIMATIONS INTERNES - AudioSourceView gère tout === */
 
-/* États initiaux : tous les éléments sont cachés */
-.stagger-1,
-.stagger-2,
-.stagger-3,
-.stagger-4,
-.stagger-5 {
-  opacity: 0;
-  transform: translateY(var(--space-05));
-}
-
-/* Animation d'entrée SEULEMENT si la classe animate-stagger est présente */
-.librespot-player.animate-stagger .stagger-1,
-.librespot-player.animate-stagger .stagger-2,
-.librespot-player.animate-stagger .stagger-3,
-.librespot-player.animate-stagger .stagger-4,
-.librespot-player.animate-stagger .stagger-5 {
-  animation: stagger-in 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-}
-
-/* Si pas d'animation, afficher directement */
-.librespot-player:not(.animate-stagger) .stagger-1,
-.librespot-player:not(.animate-stagger) .stagger-2,
-.librespot-player:not(.animate-stagger) .stagger-3,
-.librespot-player:not(.animate-stagger) .stagger-4,
-.librespot-player:not(.animate-stagger) .stagger-5 {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* Délais échelonnés */
-.librespot-player.animate-stagger .stagger-1 { animation-delay: 0ms; }
-.librespot-player.animate-stagger .stagger-2 { animation-delay: 0ms; }
-.librespot-player.animate-stagger .stagger-3 { animation-delay: 100ms; }
-.librespot-player.animate-stagger .stagger-4 { animation-delay: 200ms; }
-.librespot-player.animate-stagger .stagger-5 { animation-delay: 300ms; }
-
-/* Animation d'entrée */
-@keyframes stagger-in {
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* === STYLES DU COMPOSANT === */
+/* Styles du composant uniquement */
 .librespot-player {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .now-playing {
