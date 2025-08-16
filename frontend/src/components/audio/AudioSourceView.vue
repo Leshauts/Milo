@@ -1,39 +1,33 @@
-<!-- AudioSourceView.vue - Version corrigée pour centrage et transitions -->
+<!-- AudioSourceView.vue - Coordinateur avec gestion complète des transitions -->
 <template>
   <div class="audio-source-view">
-    <!-- Transition UNIQUE - back to basics -->
-    <Transition name="audio-content" mode="out-in">
-      
-      <!-- LibrespotView -->
-      <div 
-        v-if="shouldShowLibrespot"
-        key="librespot"
-        class="librespot-container"
-      >
-        <LibrespotView />
-      </div>
+    <!-- LibrespotView avec animations intégrées -->
+    <LibrespotView 
+      v-if="showLibrespot"
+      :key="librespotContentKey"
+      :move-in="librespotMoveIn"
+      :move-out="librespotMoveOut"
+    />
 
-      <!-- PluginStatus -->
-      <div
-        v-else-if="shouldShowPluginStatus"
-        :key="pluginStatusKey"
-        class="plugin-status-container"
-      >
-        <PluginStatus
-          :plugin-type="currentPluginType"
-          :plugin-state="currentPluginState"
-          :device-name="currentDeviceName"
-          :is-disconnecting="isDisconnecting"
-          @disconnect="$emit('disconnect')"
-        />
-      </div>
-
-    </Transition>
+    <!-- PluginStatus avec animations intégrées -->
+    <PluginStatus
+      v-if="showPluginStatus"
+      :key="pluginStatusContentKey"
+      :move-in="pluginStatusMoveIn"
+      :move-out="pluginStatusMoveOut"
+      :plugin-type="displayedPluginType"
+      :plugin-state="displayedPluginState"
+      :device-name="displayedDeviceName"
+      :is-disconnecting="isDisconnecting"
+      :frozen-content="frozenPluginContent"
+      :is-transitioning="!!frozenPluginContent"
+      @disconnect="$emit('disconnect')"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import LibrespotView from '@/views/LibrespotView.vue';
 import PluginStatus from '@/components/ui/PluginStatus.vue';
 
@@ -62,16 +56,32 @@ const props = defineProps({
   isDisconnecting: {
     type: Boolean,
     default: false
+  },
+  initialDelay: {
+    type: Boolean,
+    default: true
   }
 });
 
 // Émissions
 const emit = defineEmits(['disconnect']);
 
-// État d'attente initial (800ms)
-const showInitialDelay = ref(true);
+// États pour les composants
+const showLibrespot = ref(false);
+const showPluginStatus = ref(false);
 
-// === LOGIQUE DE DÉCISION SIMPLIFIÉE ===
+// États pour les animations
+const librespotMoveIn = ref(false);
+const librespotMoveOut = ref(false);
+const pluginStatusMoveIn = ref(false);
+const pluginStatusMoveOut = ref(false);
+
+// Contenu gelé pour préserver l'affichage pendant les transitions
+const frozenPluginContent = ref(null);
+
+let transitionTimeout = null;
+
+// === LOGIQUE DE DÉCISION ===
 const displayedSource = computed(() => {
   if (props.transitioning && props.targetSource) {
     return props.targetSource;
@@ -88,7 +98,7 @@ const hasCompleteTrackInfo = computed(() => {
 });
 
 const shouldShowLibrespot = computed(() => {
-  if (showInitialDelay.value) return false;
+  if (props.initialDelay) return false;
   
   return displayedSource.value === 'librespot' && 
          props.pluginState === 'connected' && 
@@ -97,15 +107,15 @@ const shouldShowLibrespot = computed(() => {
 });
 
 const shouldShowPluginStatus = computed(() => {
-  if (showInitialDelay.value) return false;
+  if (props.initialDelay) return false;
   
-  // Transition en cours
+  // Transition en cours - toujours PluginStatus
   if (props.transitioning) return true;
   
-  // Sources bluetooth/roc
+  // Sources bluetooth/roc - toujours PluginStatus
   if (['bluetooth', 'roc'].includes(displayedSource.value)) return true;
   
-  // Librespot sans conditions complètes
+  // Librespot sans conditions complètes - PluginStatus
   if (displayedSource.value === 'librespot') {
     return !hasCompleteTrackInfo.value || props.pluginState !== 'connected';
   }
@@ -113,19 +123,31 @@ const shouldShowPluginStatus = computed(() => {
   return false;
 });
 
-// === PROPRIÉTÉS POUR PLUGINSTATUS ===
-const currentPluginType = computed(() => {
-  // Éviter "none" qui n'est pas une valeur valide pour les composants
+// === PROPRIÉTÉS AFFICHÉES POUR PLUGINSTATUS ===
+
+// ✅ CORRECTION 1 : Si targetSource existe, l'utiliser en mode starting (logique simplifiée)
+const displayedPluginType = computed(() => {
+  if (props.targetSource && props.targetSource !== 'none') {
+    return props.targetSource;
+  }
+  
   const source = displayedSource.value;
   return source === 'none' ? 'librespot' : source;
 });
 
-const currentPluginState = computed(() => {
-  if (props.transitioning) return 'starting';
+const displayedPluginState = computed(() => {
+  if (props.targetSource && props.targetSource !== 'none') {
+    return 'starting';
+  }
   return props.pluginState;
 });
 
-const currentDeviceName = computed(() => {
+const displayedDeviceName = computed(() => {
+  // Si targetSource existe, pas de device name (on montre le loading)
+  if (props.targetSource && props.targetSource !== 'none') {
+    return '';
+  }
+  
   const metadata = props.metadata || {};
   
   switch (displayedSource.value) {
@@ -138,21 +160,201 @@ const currentDeviceName = computed(() => {
   }
 });
 
-// Clé simple pour forcer re-render quand le contenu change
-const pluginStatusKey = computed(() => {
-  return `${currentPluginType.value}-${currentPluginState.value}-${!!currentDeviceName.value}`;
+// === CONTENT KEYS ===
+const librespotContentKey = computed(() => {
+  if (!shouldShowLibrespot.value) return null;
+  return `librespot-${props.activeSource}-${props.pluginState}-${props.transitioning}`;
 });
 
-// === LIFECYCLE ===
-onMounted(() => {
-  console.log('🚀 AudioSourceView mounted - SIMPLIFIED');
-  
-  // Attente initiale de 800ms
-  setTimeout(() => {
-    console.log('🚀 Initial delay finished');
-    showInitialDelay.value = false;
-  }, 800);
+const pluginStatusContentKey = computed(() => {
+  if (!shouldShowPluginStatus.value) return null;
+  return `pluginstatus-${displayedPluginType.value}-${displayedPluginState.value}-${props.transitioning}-${displayedDeviceName.value}-${props.targetSource || 'notarget'}`;
 });
+
+// === FONCTIONS ===
+function parsePluginContentKey(key) {
+  if (!key) return null;
+  
+  const parts = key.split('-');
+  if (parts.length < 6) return null;
+  
+  return {
+    pluginType: parts[1],
+    pluginState: parts[2],
+    transitioning: parts[3] === 'true',
+    deviceName: parts[4] === '' ? '' : parts[4],
+    targetSource: parts[5] === 'notarget' ? null : parts[5],
+    isDisconnecting: false
+  };
+}
+
+function createCurrentPluginContent() {
+  return {
+    pluginType: displayedPluginType.value,
+    pluginState: displayedPluginState.value,
+    deviceName: displayedDeviceName.value,
+    isDisconnecting: props.isDisconnecting
+  };
+}
+
+async function performTransition(fromComponent, toComponent) {
+  if (transitionTimeout) {
+    clearTimeout(transitionTimeout);
+  }
+
+  console.log('🎬 Performing transition:', fromComponent, '→', toComponent);
+
+  // Phase 1: Move-out (200ms) - plus besoin de geler ici, c'est fait dans le watcher synchrone
+  if (fromComponent === 'librespot') {
+    librespotMoveOut.value = true;
+    librespotMoveIn.value = false;
+  } else if (fromComponent === 'pluginStatus') {
+    pluginStatusMoveOut.value = true;
+    pluginStatusMoveIn.value = false;
+  }
+
+  // Phase 2: Switch components
+  transitionTimeout = setTimeout(async () => {
+    // Reset move-out
+    if (fromComponent === 'librespot') {
+      librespotMoveOut.value = false;
+    } else if (fromComponent === 'pluginStatus') {
+      pluginStatusMoveOut.value = false;
+    }
+
+    // Change components
+    if (fromComponent !== toComponent) {
+      if (fromComponent === 'librespot') {
+        showLibrespot.value = false;
+      } else if (fromComponent === 'pluginStatus') {
+        showPluginStatus.value = false;
+      }
+
+      if (toComponent === 'librespot') {
+        showLibrespot.value = true;
+      } else if (toComponent === 'pluginStatus') {
+        showPluginStatus.value = true;
+      }
+    }
+
+    // Phase 3: Move-in
+    await nextTick();
+    if (toComponent === 'librespot') {
+      librespotMoveIn.value = true;
+    } else if (toComponent === 'pluginStatus') {
+      pluginStatusMoveIn.value = true;
+    }
+  }, 200);
+}
+
+async function triggerPluginStatusContentRefresh(oldContent) {
+  console.log('🔄 PluginStatus content refresh with old content:', oldContent);
+  
+  frozenPluginContent.value = oldContent;
+  pluginStatusMoveOut.value = true;
+  pluginStatusMoveIn.value = false;
+  
+  setTimeout(async () => {
+    pluginStatusMoveOut.value = false;
+    frozenPluginContent.value = null;
+    await nextTick();
+    pluginStatusMoveIn.value = true;
+  }, 200);
+}
+
+// === WATCHERS ===
+
+// ✅ CORRECTION 2 : Watcher synchrone pour capturer l'ancien contenu AVANT que les computed changent
+watch([
+  () => props.activeSource,
+  () => props.pluginState, 
+  () => props.transitioning,
+  () => props.targetSource,
+  () => props.metadata
+], (newValues, oldValues) => {
+  // Capturer l'ancien contenu si PluginStatus est affiché et que le contenu va changer
+  if (showPluginStatus.value && oldValues[0] !== undefined) {
+    const oldContent = {
+      pluginType: oldValues[3] && oldValues[3] !== 'none' ? oldValues[3] : (oldValues[0] === 'none' ? 'librespot' : oldValues[0]),
+      pluginState: oldValues[3] && oldValues[3] !== 'none' ? 'starting' : oldValues[1],
+      deviceName: oldValues[3] && oldValues[3] !== 'none' ? '' : (oldValues[4]?.device_name || oldValues[4]?.client_name || ''),
+      isDisconnecting: props.isDisconnecting
+    };
+    
+    // Si le contenu va vraiment changer, geler l'ancien
+    const newContent = {
+      pluginType: displayedPluginType.value,
+      pluginState: displayedPluginState.value,
+      deviceName: displayedDeviceName.value,
+      isDisconnecting: props.isDisconnecting
+    };
+    
+    const contentChanged = JSON.stringify(oldContent) !== JSON.stringify(newContent);
+    
+    if (contentChanged) {
+      console.log('🧊 Pre-freezing content before computed update:', oldContent);
+      frozenPluginContent.value = oldContent;
+      
+      // Déclencher move-out avec l'ancien contenu gelé
+      pluginStatusMoveOut.value = true;
+      pluginStatusMoveIn.value = false;
+      
+      setTimeout(async () => {
+        pluginStatusMoveOut.value = false;
+        frozenPluginContent.value = null;
+        await nextTick();
+        pluginStatusMoveIn.value = true;
+      }, 200);
+    }
+  }
+}, { flush: 'sync' }); // ✅ Synchrone pour s'exécuter avant les computed
+
+// Watcher principal pour les changements de composant
+watch([shouldShowLibrespot, shouldShowPluginStatus], ([newLibrespot, newPluginStatus]) => {
+  const currentlyShowingLibrespot = showLibrespot.value;
+  const currentlyShowingPluginStatus = showPluginStatus.value;
+
+  let targetComponent = null;
+  if (newLibrespot) targetComponent = 'librespot';
+  else if (newPluginStatus) targetComponent = 'pluginStatus';
+
+  let currentComponent = null;
+  if (currentlyShowingLibrespot) currentComponent = 'librespot';
+  else if (currentlyShowingPluginStatus) currentComponent = 'pluginStatus';
+
+  console.log('🎬 Component transition:', currentComponent, '→', targetComponent);
+
+  // Cas 1: Première apparition
+  if (!currentComponent && targetComponent) {
+    if (targetComponent === 'librespot') {
+      showLibrespot.value = true;
+      nextTick(() => { librespotMoveIn.value = true; });
+    } else if (targetComponent === 'pluginStatus') {
+      showPluginStatus.value = true;
+      nextTick(() => { pluginStatusMoveIn.value = true; });
+    }
+  }
+  // Cas 2: Transition entre composants différents
+  else if (currentComponent && targetComponent && currentComponent !== targetComponent) {
+    performTransition(currentComponent, targetComponent);
+  }
+  // Cas 3: Disparition
+  else if (currentComponent && !targetComponent) {
+    if (currentComponent === 'librespot') {
+      librespotMoveOut.value = true;
+      setTimeout(() => {
+        showLibrespot.value = false;
+        librespotMoveOut.value = false;
+      }, 200);
+    } else if (currentComponent === 'pluginStatus') {
+      pluginStatusMoveOut.value = true;
+      setTimeout(() => {
+        showPluginStatus.value = false;
+        pluginStatusMoveOut.value = false;
+      }, 200);
+    }
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
@@ -160,85 +362,5 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   position: relative;
-}
-
-/* === CONTAINERS POUR LAYOUTS SPÉCIFIQUES === */
-
-/* === CONTAINERS SIMPLIFIÉS === */
-
-/* LibrespotView : plein écran naturel */
-.librespot-container {
-  width: 100%;
-  height: 100%;
-}
-
-/* PluginStatus : centré naturel */
-.plugin-status-container {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-05);
-}
-
-/* === TRANSITIONS FLUIDES ET PERFORMANTES === */
-
-.audio-content-enter-active {
-  transition: all var(--transition-spring);
-}
-
-.audio-content-leave-active {
-  transition: all var(--transition-fast);
-}
-
-/* Direction par défaut pour tous */
-.audio-content-enter-from {
-  opacity: 0;
-  transform: translateY(var(--space-06)) scale(0.98);
-}
-
-.audio-content-leave-to {
-  opacity: 0;
-  transform: translateY(calc(-1 * var(--space-06))) scale(0.98);
-}
-
-.audio-content-enter-to,
-.audio-content-leave-from {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-/* Optimisations performance */
-.librespot-container,
-.plugin-status-container {
-  will-change: transform, opacity;
-  backface-visibility: hidden;
-}
-
-/* === STAGGER CORRECT ET FLUIDE === */
-
-.librespot-container .stagger-1,
-.librespot-container .stagger-2,
-.librespot-container .stagger-3,
-.librespot-container .stagger-4,
-.librespot-container .stagger-5 {
-  opacity: 0;
-  transform: translateY(var(--space-05));
-  will-change: transform, opacity;
-}
-
-/* Stagger démarre quand LibrespotView est affiché */
-.librespot-container .stagger-1 { animation: stagger-appear var(--transition-spring) forwards 0ms; }
-.librespot-container .stagger-2 { animation: stagger-appear var(--transition-spring) forwards 0ms; }
-.librespot-container .stagger-3 { animation: stagger-appear var(--transition-spring) forwards 100ms; }
-.librespot-container .stagger-4 { animation: stagger-appear var(--transition-spring) forwards 200ms; }
-.librespot-container .stagger-5 { animation: stagger-appear var(--transition-spring) forwards 300ms; }
-
-@keyframes stagger-appear {
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 </style>

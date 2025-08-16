@@ -1,43 +1,45 @@
-<!-- PluginStatus.vue - Version SIMPLIFIÉE sans gestion animation manuelle -->
+<!-- PluginStatus.vue - Avec gestion correcte du contenu gelé et transitions -->
 <template>
-  <div class="plugin-status">
-    <div class="plugin-status-content">
-      <div class="plugin-status-inner">
-        <!-- Section info appareil -->
-        <div class="device-info">
-          <div class="device-info-content">
-            <div class="device-info-inner">
-              <!-- Icône du plugin -->
-              <div class="plugin-icon">
-                <AppIcon :name="displayedIconName" :size="32"
-                    :state="displayedPluginState === 'starting' ? 'loading' : 'normal'" />
-              </div>
-
-              <!-- Statut textuel -->
-              <div class="device-status">
-                <div v-if="displayedStatusLines.length === 1" class="status-single">
-                  <h2 class="heading-2">{{ displayedStatusLines[0] }}</h2>
+  <div class="plugin-status-container">
+    <div class="plugin-status stagger-1" :class="animationClasses">
+      <div class="plugin-status-content">
+        <div class="plugin-status-inner">
+          <!-- Section info appareil -->
+          <div class="device-info">
+            <div class="device-info-content">
+              <div class="device-info-inner">
+                <!-- Icône du plugin -->
+                <div class="plugin-icon">
+                  <AppIcon :name="displayedIconName" :size="32"
+                      :state="displayedPluginState === 'starting' ? 'loading' : 'normal'" />
                 </div>
-                <template v-else>
-                  <div class="status-line-1" :class="getDisplayedStatusLine1Class()">
+
+                <!-- Statut textuel -->
+                <div class="device-status">
+                  <div v-if="displayedStatusLines.length === 1" class="status-single">
                     <h2 class="heading-2">{{ displayedStatusLines[0] }}</h2>
                   </div>
-                  <div class="status-line-2" :class="getDisplayedStatusLine2Class()">
-                    <h2 class="heading-2">{{ displayedStatusLines[1] }}</h2>
-                  </div>
-                </template>
+                  <template v-else>
+                    <div class="status-line-1" :class="getDisplayedStatusLine1Class()">
+                      <h2 class="heading-2">{{ displayedStatusLines[0] }}</h2>
+                    </div>
+                    <div class="status-line-2" :class="getDisplayedStatusLine2Class()">
+                      <h2 class="heading-2">{{ displayedStatusLines[1] }}</h2>
+                    </div>
+                  </template>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Bouton déconnecter (conditionnel) -->
-        <div v-if="displayedShowDisconnectButton" class="disconnect-button">
-          <div class="disconnect-button-content">
-            <div class="disconnect-button-inner">
-              <button @click="handleDisconnect" :disabled="isDisconnecting" class="disconnect-text">
-                <p>{{ isDisconnecting ? 'Déconnexion...' : 'Déconnecter' }}</p>
-              </button>
+          <!-- Bouton déconnecter (conditionnel) -->
+          <div v-if="displayedShowDisconnectButton" class="disconnect-button">
+            <div class="disconnect-button-content">
+              <div class="disconnect-button-inner">
+                <button @click="handleDisconnect" :disabled="displayedIsDisconnecting" class="disconnect-text">
+                  <p>{{ displayedIsDisconnecting ? 'Déconnexion...' : 'Déconnecter' }}</p>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -47,11 +49,19 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import AppIcon from './AppIcon.vue';
 
 // Props
 const props = defineProps({
+  moveIn: {
+    type: Boolean,
+    default: false
+  },
+  moveOut: {
+    type: Boolean,
+    default: false
+  },
   pluginType: {
     type: String,
     required: true,
@@ -68,11 +78,25 @@ const props = defineProps({
   isDisconnecting: {
     type: Boolean,
     default: false
+  },
+  frozenContent: {
+    type: Object,
+    default: null
+  },
+  isTransitioning: {
+    type: Boolean,
+    default: false
   }
 });
 
 // Émissions
 const emit = defineEmits(['disconnect']);
+
+// === CLASSES D'ANIMATION ===
+const animationClasses = computed(() => ({
+  'move-in': props.moveIn,
+  'move-out': props.moveOut
+}));
 
 // === FONCTION UTILITAIRE ===
 function cleanDeviceName(deviceName) {
@@ -83,18 +107,51 @@ function cleanDeviceName(deviceName) {
 }
 
 // === COMPUTED POUR LE CONTENU AFFICHÉ ===
+
+// ✅ CORRECTION : Utiliser le contenu gelé pendant les transitions de sortie SEULEMENT
 const displayedIconName = computed(() => {
-  return props.pluginType === 'librespot' ? 'spotify' : props.pluginType;
+  const pluginType = props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.pluginType 
+    : props.pluginType;
+  return pluginType === 'librespot' ? 'spotify' : pluginType;
 });
 
 const displayedPluginState = computed(() => {
-  return props.pluginState;
+  return props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.pluginState 
+    : props.pluginState;
+});
+
+const displayedDeviceName = computed(() => {
+  return props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.deviceName 
+    : props.deviceName;
+});
+
+const displayedIsDisconnecting = computed(() => {
+  return props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.isDisconnecting 
+    : props.isDisconnecting;
 });
 
 const displayedStatusLines = computed(() => {
-  // État de démarrage
-  if (props.pluginState === 'starting') {
-    switch (props.pluginType) {
+  const pluginType = props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.pluginType 
+    : props.pluginType;
+  const pluginState = displayedPluginState.value;
+  const deviceName = displayedDeviceName.value;
+
+  console.log('🔍 PluginStatus displayedStatusLines:', {
+    pluginType,
+    pluginState, 
+    deviceName,
+    isTransitioning: props.isTransitioning,
+    hasFrozenContent: !!props.frozenContent
+  });
+
+  // État de démarrage - affiché pendant les transitions avec loading icon
+  if (pluginState === 'starting') {
+    switch (pluginType) {
       case 'bluetooth':
         return ['Démarrage du', 'Bluetooth'];
       case 'roc':
@@ -107,8 +164,8 @@ const displayedStatusLines = computed(() => {
   }
 
   // État ready : messages d'attente
-  if (props.pluginState === 'ready') {
-    switch (props.pluginType) {
+  if (pluginState === 'ready') {
+    switch (pluginType) {
       case 'bluetooth':
         return ['Bluetooth', 'Prêt à diffuser'];
       case 'roc':
@@ -121,16 +178,16 @@ const displayedStatusLines = computed(() => {
   }
 
   // État connected : messages avec nom d'appareil
-  if (props.pluginState === 'connected' && props.deviceName) {
-    const cleanedDeviceName = cleanDeviceName(props.deviceName);
+  if (pluginState === 'connected' && deviceName) {
+    const cleanedDeviceName = cleanDeviceName(deviceName);
     
-    switch (props.pluginType) {
+    switch (pluginType) {
       case 'bluetooth':
         return ['Connecté à', cleanedDeviceName];
       case 'roc':
         return ['Connecté au', cleanedDeviceName];
       default:
-        return ['Connecté à', props.deviceName];
+        return ['Connecté à', deviceName];
     }
   }
 
@@ -138,28 +195,35 @@ const displayedStatusLines = computed(() => {
 });
 
 const displayedShowDisconnectButton = computed(() => {
-  if (props.pluginState === 'starting') {
+  const pluginType = props.isTransitioning && props.frozenContent 
+    ? props.frozenContent.pluginType 
+    : props.pluginType;
+  const pluginState = displayedPluginState.value;
+  
+  if (pluginState === 'starting') {
     return false;
   }
-  return props.pluginType === 'bluetooth' && props.pluginState === 'connected';
+  return pluginType === 'bluetooth' && pluginState === 'connected';
 });
 
 // Classes pour les lignes de statut
 function getDisplayedStatusLine1Class() {
-  if (props.pluginState === 'starting') {
+  const pluginState = displayedPluginState.value;
+  if (pluginState === 'starting') {
     return 'starting-state';
   }
-  if (props.pluginState === 'connected') {
+  if (pluginState === 'connected') {
     return 'connected-state';
   }
   return '';
 }
 
 function getDisplayedStatusLine2Class() {
-  if (props.pluginState === 'starting') {
+  const pluginState = displayedPluginState.value;
+  if (pluginState === 'starting') {
     return 'starting-state';
   }
-  if (props.pluginState === 'connected') {
+  if (pluginState === 'connected') {
     return 'connected-state';
   }
   return 'secondary-state';
@@ -169,9 +233,83 @@ function getDisplayedStatusLine2Class() {
 function handleDisconnect() {
   emit('disconnect');
 }
+
+// === GESTION DES ANIMATIONS ===
+watch(() => props.moveIn, (newMoveIn) => {
+  if (newMoveIn) {
+    console.log('🎬 PluginStatus: Move-in triggered, starting animation');
+  }
+});
+
+watch(() => props.moveOut, (newMoveOut) => {
+  if (newMoveOut) {
+    console.log('🎬 PluginStatus: Move-out triggered, starting fade-out animation');
+  }
+});
+
+// === DEBUG CONTENU GELÉ ===
+watch(() => props.frozenContent, (newFrozen) => {
+  if (newFrozen) {
+    console.log('🧊 PluginStatus: Using frozen content during transition:', newFrozen);
+  } else {
+    console.log('🔄 PluginStatus: Using current content');
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
+/* === ANIMATIONS HARMONISÉES === */
+
+/* Container pour centrage */
+.plugin-status-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-05);
+}
+
+/* État initial : caché */
+.plugin-status.stagger-1 {
+  opacity: 0;
+  transform: translateY(32px);
+  will-change: transform, opacity;
+}
+
+/* Move-in : stagger depuis le bas avec transition spring */
+.plugin-status.stagger-1.move-in {
+  animation: moveInStagger var(--transition-spring) forwards 0ms;
+}
+
+/* Move-out : fade + slide vers le haut */
+.plugin-status.stagger-1.move-out {
+  animation: moveOut 200ms ease forwards;
+}
+
+/* Keyframes */
+@keyframes moveInStagger {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes moveOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-32px);
+  }
+}
+
 /* === STYLES DU COMPOSANT === */
 .plugin-status {
   background: var(--color-background-neutral);
@@ -179,7 +317,6 @@ function handleDisconnect() {
   box-shadow: var(--shadow-02);
   width: 364px;
   position: relative;
-  margin: auto;
 }
 
 .plugin-status-content {

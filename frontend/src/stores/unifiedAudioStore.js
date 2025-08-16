@@ -233,7 +233,7 @@ export const useUnifiedAudioStore = defineStore('unifiedAudio', () => {
     console.log('📊 New state:', JSON.stringify(newState, null, 2));
     
     // Tracer d'où vient l'appel
-    console.trace('Update called from:');
+    // console.trace('Update called from:');
     
     systemState.value = {
       active_source: newState.active_source || 'none',

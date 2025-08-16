@@ -1,6 +1,6 @@
-<!-- LibrespotView.vue - Version PASSIVE sans animations internes -->
+<!-- LibrespotView.vue - Avec reset forcé des animations stagger -->
 <template>
-  <div class="librespot-player">
+  <div class="librespot-player" :class="animationClasses">
     <div class="now-playing">
       <!-- Partie gauche : Image de couverture -->
       <div class="album-art-section stagger-1">
@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { computed, watch, onMounted, ref } from 'vue';
+import { computed, watch, onMounted, ref, nextTick } from 'vue';
 import { useUnifiedAudioStore } from '@/stores/unifiedAudioStore';
 import { useLibrespotControl } from '@/composables/useLibrespotControl';
 import { usePlaybackProgress } from '@/composables/usePlaybackProgress';
@@ -56,9 +56,40 @@ import axios from 'axios';
 import PlaybackControls from '../components/librespot/PlaybackControls.vue';
 import ProgressBar from '../components/librespot/ProgressBar.vue';
 
+// Props pour les animations
+const props = defineProps({
+  moveIn: {
+    type: Boolean,
+    default: false
+  },
+  moveOut: {
+    type: Boolean,
+    default: false
+  }
+});
+
 const unifiedStore = useUnifiedAudioStore();
 const { togglePlayPause, previousTrack, nextTrack } = useLibrespotControl();
 const { currentPosition, duration, progressPercentage, seekTo } = usePlaybackProgress();
+
+// === CLASSES D'ANIMATION ===
+const animationClasses = computed(() => ({
+  'move-in': props.moveIn,
+  'move-out': props.moveOut
+}));
+
+// === GESTION DES ANIMATIONS ===
+watch(() => props.moveIn, (newMoveIn) => {
+  if (newMoveIn) {
+    console.log('🎬 LibrespotView: Move-in triggered, starting stagger animation');
+  }
+});
+
+watch(() => props.moveOut, (newMoveOut) => {
+  if (newMoveOut) {
+    console.log('🎬 LibrespotView: Move-out triggered, starting fade-out animation');
+  }
+});
 
 // === PERSISTANCE DES MÉTADONNÉES ===
 const lastValidMetadata = ref({
@@ -95,7 +126,7 @@ watch(() => unifiedStore.metadata, (newMetadata) => {
 
 // === LIFECYCLE ===
 onMounted(async () => {
-  console.log('🎬 LibrespotView mounted - PASSIVE (no internal animations)');
+  console.log('🎬 LibrespotView mounted');
   
   try {
     const response = await axios.get('/librespot/status');
@@ -123,9 +154,70 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* === PLUS D'ANIMATIONS INTERNES - AudioSourceView gère tout === */
+/* === ANIMATIONS SIMPLIFIÉES === */
 
-/* Styles du composant uniquement */
+/* État initial : éléments cachés */
+.librespot-player .stagger-1,
+.librespot-player .stagger-2,
+.librespot-player .stagger-3,
+.librespot-player .stagger-4,
+.librespot-player .stagger-5 {
+  opacity: 0;
+  transform: translateY(32px);
+  will-change: transform, opacity;
+}
+
+/* Move-in : animer depuis le bas */
+.librespot-player.move-in .stagger-1 { 
+  animation: moveInStagger var(--transition-spring) forwards 0ms; 
+}
+.librespot-player.move-in .stagger-2 { 
+  animation: moveInStagger var(--transition-spring) forwards 100ms; 
+}
+.librespot-player.move-in .stagger-3 { 
+  animation: moveInStagger var(--transition-spring) forwards 200ms; 
+}
+.librespot-player.move-in .stagger-4 { 
+  animation: moveInStagger var(--transition-spring) forwards 300ms; 
+}
+.librespot-player.move-in .stagger-5 { 
+  animation: moveInStagger var(--transition-spring) forwards 400ms; 
+}
+
+/* Move-out : fade + slide vers le haut */
+.librespot-player.move-out .stagger-1,
+.librespot-player.move-out .stagger-2,
+.librespot-player.move-out .stagger-3,
+.librespot-player.move-out .stagger-4,
+.librespot-player.move-out .stagger-5 {
+  animation: moveOut 200ms ease forwards;
+}
+
+/* Keyframes */
+@keyframes moveInStagger {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes moveOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-32px);
+  }
+}
+
+/* === STYLES DU COMPOSANT === */
+
 .librespot-player {
   width: 100%;
   height: 100%;

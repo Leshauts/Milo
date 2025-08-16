@@ -1,4 +1,4 @@
-<!-- MainView.vue - Version ULTRA-SIMPLIFIÉE avec z-index corrects -->
+<!-- MainView.vue - Avec délai initial de 800ms pour AudioSourceView -->
 <template>
   <div class="main-view">
     <!-- AudioSourceView - Le plus bas -->
@@ -10,6 +10,7 @@
         :target-source="unifiedStore.systemState.target_source"
         :metadata="unifiedStore.metadata"
         :is-disconnecting="disconnectingStates[unifiedStore.currentSource]"
+        :initial-delay="showInitialDelay"
         @disconnect="handleDisconnect"
       />
     </div>
@@ -24,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useUnifiedAudioStore } from '@/stores/unifiedAudioStore';
 import AudioSourceView from '@/components/audio/AudioSourceView.vue';
 import Logo from '@/components/ui/Logo.vue';
@@ -38,11 +39,14 @@ const disconnectingStates = ref({
   librespot: false
 });
 
+// Délai initial pour AudioSourceView
+const showInitialDelay = ref(true);
+
 // === LOGIQUE DU LOGO SIMPLIFIÉE ===
 
 const logoPosition = computed(() => {
-  // Logo centré si aucune source active
-  if (unifiedStore.currentSource === 'none' && !unifiedStore.isTransitioning) {
+  // Logo centré pendant le délai initial ou si aucune source active
+  if (showInitialDelay.value || (unifiedStore.currentSource === 'none' && !unifiedStore.isTransitioning)) {
     return 'center';
   }
   
@@ -55,6 +59,11 @@ const logoSize = computed(() => {
 });
 
 const logoVisible = computed(() => {
+  // Pendant le délai initial, toujours afficher le logo
+  if (showInitialDelay.value) {
+    return true;
+  }
+
   // Cacher le logo quand LibrespotView est affiché (plein écran)
   const hasCompleteTrackInfo = !!(
     unifiedStore.pluginState === 'connected' &&
@@ -112,6 +121,17 @@ async function handleDisconnect() {
     }, 1000);
   }
 }
+
+// === LIFECYCLE ===
+onMounted(() => {
+  console.log('🚀 MainView mounted - Starting initial delay sequence');
+  
+  // Délai initial : 800ms après le montage (le logo s'affiche pendant 1000ms total)
+  setTimeout(() => {
+    console.log('🚀 Initial delay finished - AudioSourceView can now show content');
+    showInitialDelay.value = false;
+  }, 800);
+});
 </script>
 
 <style scoped>
