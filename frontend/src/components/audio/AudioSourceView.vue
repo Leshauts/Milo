@@ -1,4 +1,4 @@
-<!-- AudioSourceView.vue - Coordinateur avec gestion complète des transitions -->
+<!-- AudioSourceView.vue - Version finale avec gestion optimisée des transitions -->
 <template>
   <div class="audio-source-view">
     <!-- LibrespotView avec animations intégrées -->
@@ -125,7 +125,6 @@ const shouldShowPluginStatus = computed(() => {
 
 // === PROPRIÉTÉS AFFICHÉES POUR PLUGINSTATUS ===
 
-// ✅ CORRECTION 1 : Si targetSource existe, l'utiliser en mode starting (logique simplifiée)
 const displayedPluginType = computed(() => {
   if (props.targetSource && props.targetSource !== 'none') {
     return props.targetSource;
@@ -172,39 +171,12 @@ const pluginStatusContentKey = computed(() => {
 });
 
 // === FONCTIONS ===
-function parsePluginContentKey(key) {
-  if (!key) return null;
-  
-  const parts = key.split('-');
-  if (parts.length < 6) return null;
-  
-  return {
-    pluginType: parts[1],
-    pluginState: parts[2],
-    transitioning: parts[3] === 'true',
-    deviceName: parts[4] === '' ? '' : parts[4],
-    targetSource: parts[5] === 'notarget' ? null : parts[5],
-    isDisconnecting: false
-  };
-}
-
-function createCurrentPluginContent() {
-  return {
-    pluginType: displayedPluginType.value,
-    pluginState: displayedPluginState.value,
-    deviceName: displayedDeviceName.value,
-    isDisconnecting: props.isDisconnecting
-  };
-}
-
 async function performTransition(fromComponent, toComponent) {
   if (transitionTimeout) {
     clearTimeout(transitionTimeout);
   }
 
-  console.log('🎬 Performing transition:', fromComponent, '→', toComponent);
-
-  // Phase 1: Move-out (200ms) - plus besoin de geler ici, c'est fait dans le watcher synchrone
+  // Phase 1: Move-out
   if (fromComponent === 'librespot') {
     librespotMoveOut.value = true;
     librespotMoveIn.value = false;
@@ -247,24 +219,9 @@ async function performTransition(fromComponent, toComponent) {
   }, 200);
 }
 
-async function triggerPluginStatusContentRefresh(oldContent) {
-  console.log('🔄 PluginStatus content refresh with old content:', oldContent);
-  
-  frozenPluginContent.value = oldContent;
-  pluginStatusMoveOut.value = true;
-  pluginStatusMoveIn.value = false;
-  
-  setTimeout(async () => {
-    pluginStatusMoveOut.value = false;
-    frozenPluginContent.value = null;
-    await nextTick();
-    pluginStatusMoveIn.value = true;
-  }, 200);
-}
-
 // === WATCHERS ===
 
-// ✅ CORRECTION 2 : Watcher synchrone pour capturer l'ancien contenu AVANT que les computed changent
+// Watcher synchrone pour capturer l'ancien contenu AVANT que les computed changent
 watch([
   () => props.activeSource,
   () => props.pluginState, 
@@ -272,12 +229,42 @@ watch([
   () => props.targetSource,
   () => props.metadata
 ], (newValues, oldValues) => {
-  // Capturer l'ancien contenu si PluginStatus est affiché et que le contenu va changer
+  const [newActiveSource, newPluginState, newTransitioning, newTargetSource] = newValues;
+  const [oldActiveSource, oldPluginState, oldTransitioning, oldTargetSource] = oldValues || [];
+
+  // Détecter transition DEPUIS LibrespotView vers PluginStatus
+  const wasShowingLibrespot = showLibrespot.value;
+  
+  // Si on vient de LibrespotView et qu'on va vers PluginStatus à cause d'une transition
+  if (wasShowingLibrespot && newTransitioning && newTargetSource && newTargetSource !== 'none' && oldValues[0] !== undefined) {
+    // Créer un contenu gelé spécifique pour les transitions depuis LibrespotView
+    frozenPluginContent.value = {
+      pluginType: newTargetSource,
+      pluginState: 'starting',
+      deviceName: '',
+      isDisconnecting: false
+    };
+    
+    // Déclencher l'animation de sortie
+    pluginStatusMoveOut.value = true;
+    pluginStatusMoveIn.value = false;
+    
+    setTimeout(async () => {
+      pluginStatusMoveOut.value = false;
+      frozenPluginContent.value = null;
+      await nextTick();
+      pluginStatusMoveIn.value = true;
+    }, 200);
+    
+    return; // Sortir tôt pour éviter la logique normale
+  }
+
+  // Logique normale: Capturer l'ancien contenu si PluginStatus était déjà affiché
   if (showPluginStatus.value && oldValues[0] !== undefined) {
     const oldContent = {
-      pluginType: oldValues[3] && oldValues[3] !== 'none' ? oldValues[3] : (oldValues[0] === 'none' ? 'librespot' : oldValues[0]),
-      pluginState: oldValues[3] && oldValues[3] !== 'none' ? 'starting' : oldValues[1],
-      deviceName: oldValues[3] && oldValues[3] !== 'none' ? '' : (oldValues[4]?.device_name || oldValues[4]?.client_name || ''),
+      pluginType: oldTargetSource && oldTargetSource !== 'none' ? oldTargetSource : (oldActiveSource === 'none' ? 'librespot' : oldActiveSource),
+      pluginState: oldTargetSource && oldTargetSource !== 'none' ? 'starting' : oldPluginState,
+      deviceName: oldTargetSource && oldTargetSource !== 'none' ? '' : (props.metadata?.device_name || props.metadata?.client_name || ''),
       isDisconnecting: props.isDisconnecting
     };
     
@@ -292,7 +279,6 @@ watch([
     const contentChanged = JSON.stringify(oldContent) !== JSON.stringify(newContent);
     
     if (contentChanged) {
-      console.log('🧊 Pre-freezing content before computed update:', oldContent);
       frozenPluginContent.value = oldContent;
       
       // Déclencher move-out avec l'ancien contenu gelé
@@ -307,7 +293,7 @@ watch([
       }, 200);
     }
   }
-}, { flush: 'sync' }); // ✅ Synchrone pour s'exécuter avant les computed
+}, { flush: 'sync' });
 
 // Watcher principal pour les changements de composant
 watch([shouldShowLibrespot, shouldShowPluginStatus], ([newLibrespot, newPluginStatus]) => {
@@ -321,8 +307,6 @@ watch([shouldShowLibrespot, shouldShowPluginStatus], ([newLibrespot, newPluginSt
   let currentComponent = null;
   if (currentlyShowingLibrespot) currentComponent = 'librespot';
   else if (currentlyShowingPluginStatus) currentComponent = 'pluginStatus';
-
-  console.log('🎬 Component transition:', currentComponent, '→', targetComponent);
 
   // Cas 1: Première apparition
   if (!currentComponent && targetComponent) {

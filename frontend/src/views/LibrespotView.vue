@@ -1,4 +1,4 @@
-<!-- LibrespotView.vue - Avec reset forcé des animations stagger -->
+<!-- LibrespotView.vue - Version finale avec protections anti-écrasement -->
 <template>
   <div class="librespot-player" :class="animationClasses">
     <div class="now-playing">
@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { computed, watch, onMounted, ref, nextTick } from 'vue';
+import { computed, watch, onMounted, ref } from 'vue';
 import { useUnifiedAudioStore } from '@/stores/unifiedAudioStore';
 import { useLibrespotControl } from '@/composables/useLibrespotControl';
 import { usePlaybackProgress } from '@/composables/usePlaybackProgress';
@@ -78,19 +78,6 @@ const animationClasses = computed(() => ({
   'move-out': props.moveOut
 }));
 
-// === GESTION DES ANIMATIONS ===
-watch(() => props.moveIn, (newMoveIn) => {
-  if (newMoveIn) {
-    console.log('🎬 LibrespotView: Move-in triggered, starting stagger animation');
-  }
-});
-
-watch(() => props.moveOut, (newMoveOut) => {
-  if (newMoveOut) {
-    console.log('🎬 LibrespotView: Move-out triggered, starting fade-out animation');
-  }
-});
-
 // === PERSISTANCE DES MÉTADONNÉES ===
 const lastValidMetadata = ref({
   title: '',
@@ -117,21 +104,27 @@ const persistentMetadata = computed(() => {
   return lastValidMetadata.value;
 });
 
-// === WATCHERS ===
-watch(() => unifiedStore.metadata, (newMetadata) => {
-  if (newMetadata?.position !== undefined) {
-    // La synchronisation est gérée dans usePlaybackProgress
-  }
-}, { immediate: true });
-
-// === LIFECYCLE ===
+// === LIFECYCLE AVEC PROTECTIONS ===
 onMounted(async () => {
-  console.log('🎬 LibrespotView mounted');
+  // Protection: Ne pas faire d'appel API pendant une transition
+  if (unifiedStore.isTransitioning) {
+    return;
+  }
+  
+  // Protection: Vérifier que nous sommes bien sur librespot
+  if (unifiedStore.currentSource !== 'librespot') {
+    return;
+  }
   
   try {
     const response = await axios.get('/librespot/status');
     if (response.data.status === 'ok') {
       const metadata = response.data.metadata || {};
+
+      // Protection supplémentaire: Vérifier à nouveau qu'on n'est pas en transition
+      if (unifiedStore.isTransitioning) {
+        return;
+      }
 
       unifiedStore.updateState({
         data: {
@@ -144,8 +137,6 @@ onMounted(async () => {
           }
         }
       });
-
-      console.log("Position initiale chargée:", metadata.position);
     }
   } catch (error) {
     console.error('Error fetching librespot status:', error);
@@ -154,7 +145,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* === ANIMATIONS SIMPLIFIÉES === */
+/* === ANIMATIONS === */
 
 /* État initial : éléments cachés */
 .librespot-player .stagger-1,
